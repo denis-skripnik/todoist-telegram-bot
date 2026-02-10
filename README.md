@@ -11,6 +11,7 @@ A personal Telegram bot for managing Todoist tasks with a clean single-message i
 - **Task Management** - Add, complete, reopen, delete tasks, edit task content and due dates
 - **Tag Management** - Create, rename, and delete labels/tags for task organization
 - **Task Filtering** - Filter tasks by tags (all tasks, specific tag, or tasks without tags)
+- **Subtasks Support** - View and create subtasks inside task details
 - **Smart Notifications** - Automatic notifications for tasks with due times (checked every minute) and daily reminders at 9:00 AM for tasks without specific times
 - **Natural Language Dates** - Parse dates in various formats (e.g., "tomorrow at 15:00", "25.12.2026")
 - **Pagination** - Browse tasks in pages (5 tasks per page)
@@ -152,6 +153,9 @@ Your language preference is saved in state.json and persists across bot restarts
 - Check that tasks have proper due dates set.
 - Notifications for tasks with specific times are checked every minute.
 - Daily notifications for tasks without times are sent at 9:00 AM.
+
+### about subtasks
+subtasks are shown only in task detail and are not displayed in the general task list of the project.
 
 ## Security Note
 
