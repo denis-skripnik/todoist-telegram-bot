@@ -12,7 +12,8 @@ import {
   getAllLabels,
   getTasksByProjectAndLabel,
   getCompletedTasks,
-  getTask
+  getTask,
+  getSubtasks
 } from "./todoist_api.js";
 import { t } from "./lngs/index.js";
 
@@ -293,7 +294,11 @@ export async function renderTaskDetailScreen(state, taskId) {
     }
   }
   
-  const isCompleted = task.is_completed || task.completed_at;
+const isCompleted =
+  task.is_completed === true ||
+  task.isCompleted === true ||
+  Boolean(task.completed_at || task.completedAt);
+  const isSubtask = task.parentId != null;
   const taskContent = task.item_object?.content ?? task.content ?? "";
   
   let text = t(state, 'task.detail_title');
@@ -309,6 +314,38 @@ export async function renderTaskDetailScreen(state, taskId) {
   
   text += t(state, 'task.status_label', isCompleted);
   
+  // Add subtasks section (only for parent tasks, not completed)
+  let subtasks = [];
+  if (!isSubtask && !isCompleted) {
+    try {
+      subtasks = await getSubtasks(taskId);
+      const subtaskPage = state.screen.subtaskPage || 0;
+      const SUBTASKS_PER_PAGE = 5;
+      const totalPages = Math.ceil(subtasks.length / SUBTASKS_PER_PAGE);
+      const currentPage = Math.min(subtaskPage, Math.max(0, totalPages - 1));
+      const startIdx = currentPage * SUBTASKS_PER_PAGE;
+      const endIdx = Math.min(startIdx + SUBTASKS_PER_PAGE, subtasks.length);
+      const pageSubtasks = subtasks.slice(startIdx, endIdx);
+      
+      text += "\n\n" + t(state, 'subtasks.section_title') + "\n";
+      
+      if (subtasks.length === 0) {
+        text += t(state, 'subtasks.no_subtasks');
+      } else {
+        text += t(state, 'subtasks.count', { current: pageSubtasks.length, total: subtasks.length }) + "\n";
+        pageSubtasks.forEach((subtask) => {
+          const content = subtask.content ?? "";
+          const preview = content.length > 40 ? content.substring(0, 40) + "..." : content;
+          text += `↳ ${preview}\n`;
+        });
+      }
+      
+      subtasks = pageSubtasks; // Store page subtasks for keyboard
+    } catch (e) {
+      console.error("Error fetching subtasks:", e);
+    }
+  }
+  
   const keyboard = new InlineKeyboard();
   
   if (!isCompleted) {
@@ -318,6 +355,25 @@ export async function renderTaskDetailScreen(state, taskId) {
     keyboard.text(t(state, 'task.edit_labels_button'), `task:editlabels:${taskId}`).row();
   } else {
     keyboard.text(t(state, 'task.reopen_button'), `task:reopen:${taskId}`).row();
+  }
+  
+  // Add subtask buttons (only for parent tasks, not completed)
+  if (!isSubtask && !isCompleted && subtasks.length > 0) {
+    subtasks.forEach((subtask) => {
+      const content = subtask.content ?? "";
+      const label = `↳ ${content.substring(0, 25)}${content.length > 25 ? '...' : ''}`;
+      keyboard.text(label, `task:view:${subtask.id}`).row();
+    });
+  }
+  
+  // Add subtask button
+  if (!isSubtask && !isCompleted) {
+    keyboard.text(t(state, 'subtasks.add_button'), `subtask:add:${taskId}`).row();
+  }
+  
+  // If this is a subtask, add "Back to Parent" button
+  if (isSubtask) {
+    keyboard.text(t(state, 'subtasks.back_to_parent'), `task:view:${task.parentId}`).row();
   }
   
   keyboard.text(t(state, 'common.delete'), `task:delete:${taskId}`).row();

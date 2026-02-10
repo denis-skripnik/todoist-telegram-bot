@@ -204,3 +204,34 @@ export async function updateTaskDue(taskId, dueString) {
 export async function getTask(taskId) {
   return todoist.getTask(taskId);
 }
+
+// === Subtasks ===
+/**
+ * Get all subtasks for a parent task
+ * @param {string} parentTaskId - Parent task ID
+ * @returns {Promise<Array>} Array of subtask objects
+ */
+export async function getSubtasks(parentTaskId) {
+  // First get parent task to obtain projectId
+  const parentTask = await todoist.getTask(parentTaskId);
+  
+  // Fetch all tasks in the same project
+  const allTasks = await todoist.getTasks({ projectId: parentTask.projectId });
+  const tasks = normalizeArrayResponse(allTasks, "getTasks(subtasks)");
+  
+  // Filter to only subtasks of this parent
+  return tasks.filter(t => t.parentId === parentTaskId);
+}
+
+/**
+ * Create a subtask under a parent task
+ * @param {string} parentTaskId - Parent task ID
+ * @param {string} content - Subtask content
+ * @param {string|null} dueString - Optional due date
+ * @returns {Promise<object>} Created subtask
+ */
+export async function createSubtask(parentTaskId, content, dueString = null) {
+  const task = { content, parentId: parentTaskId };
+  if (dueString) task.dueString = dueString;
+  return todoist.addTask(task);
+}

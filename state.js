@@ -56,6 +56,7 @@ export function migrateState() {
           page: 0,
           showCompleted: false,
           parentId: null,
+          subtaskPage: 0,
           confirmAction: null,
           beforeConfirm: null
         },
@@ -68,6 +69,12 @@ export function migrateState() {
     if (state.screen && state.screen.type === "lists") {
       console.log(`Migrating screen type "lists" -> "projects" for chat ${chatId}`);
       state.screen.type = "projects";
+    }
+    
+    // Add subtaskPage field if missing
+    if (state.screen && state.screen.subtaskPage === undefined) {
+      console.log(`Adding subtaskPage field for chat ${chatId}`);
+      state.screen.subtaskPage = 0;
     }
   }
   

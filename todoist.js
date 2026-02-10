@@ -2,7 +2,7 @@ import { Bot, InlineKeyboard } from "grammy";
 import * as chrono from "chrono-node";
 import { TELEGRAM_BOT_TOKEN, TODOIST_API_TOKEN, USER_CHAT_ID, TASKS_PER_PAGE, MAX_TASK_PREVIEW_LENGTH, LABEL_FILTER_ALL, LABEL_FILTER_NONE } from "./config.js";
 import { userStates, notifiedTasks, loadState, migrateState, saveState } from "./state.js";
-import { todoist, getCompletedTasks, getAllProjects, getTasksByProject, addTask, deleteTask, completeTask, reopenTask, createProject, updateProject, deleteProject, getAllLabels, createLabel, updateLabel, deleteLabel, getTasksByProjectAndLabel, updateTaskLabels, updateTaskContent, updateTaskDue, getTask } from "./todoist_api.js";
+import { todoist, getCompletedTasks, getAllProjects, getTasksByProject, addTask, deleteTask, completeTask, reopenTask, createProject, updateProject, deleteProject, getAllLabels, createLabel, updateLabel, deleteLabel, getTasksByProjectAndLabel, updateTaskLabels, updateTaskContent, updateTaskDue, getTask, getSubtasks, createSubtask } from "./todoist_api.js";
 import { renderLanguageSelectionScreen, renderMainMenu, renderProjectsScreen, renderProjectActionsScreen, renderTagsScreen, renderTagActionsScreen, renderProjectSelectionScreen, renderLabelFilterScreen, renderTaskListScreen, renderTaskDetailScreen, renderTaskLabelsPickerScreen, renderConfirmDialog, updateScreen } from "./screens.js";
 import { setupNotifications } from "./notifications.js";
 import { t } from "./lngs/index.js";
@@ -33,6 +33,7 @@ bot.command("start", async (ctx) => {
         page: 0,
         showCompleted: false,
         parentId: null,
+        subtaskPage: 0,
         confirmAction: null,
         beforeConfirm: null
       },
@@ -357,7 +358,30 @@ bot.on("callback_query:data", async (ctx) => {
     const taskId = data.split(":")[2];
     state.screen.taskId = taskId;
     state.screen.type = "task_detail";
+    state.screen.subtaskPage = 0;
     const screen = await renderTaskDetailScreen(state, taskId);
+    await updateScreen(ctx, chatId, screen);
+    await ctx.answerCallbackQuery();
+    return;
+  }
+  
+  // === SUBTASK HANDLERS ===
+  if (data.startsWith("subtask:add:")) {
+    const parentTaskId = data.split(":")[2];
+    state.mode = "adding_subtask";
+    state.tempData = { parentTaskId };
+    await ctx.answerCallbackQuery({ text: t(state, 'subtasks.enter_text_prompt') });
+    await ctx.reply(t(state, 'subtasks.enter_text_full'));
+    return;
+  }
+  
+  if (data.startsWith("subtask:page:")) {
+    const parts = data.split(":");
+    const parentTaskId = parts[2];
+    const page = parseInt(parts[3]);
+    state.screen.subtaskPage = page;
+    state.screen.taskId = parentTaskId;
+    const screen = await renderTaskDetailScreen(state, parentTaskId);
     await updateScreen(ctx, chatId, screen);
     await ctx.answerCallbackQuery();
     return;
@@ -707,6 +731,66 @@ bot.on("message:text", async (ctx) => {
       await updateScreen(ctx, chatId, screen);
     } catch (e) {
       await ctx.reply(t(state, 'errors.task_add_failed', e.message));
+    }
+    return;
+  }
+  
+  // === ADD SUBTASK ===
+  if (state.mode === "adding_subtask") {
+    const parentTaskId = state.tempData.parentTaskId;
+    const contentRaw = text;
+    
+    // Reuse existing date parsing logic
+    const EXPLICIT_DT_RE = /\b(\d{1,2})[.\-/](\d{1,2})[.\-/](\d{4})(?:\s+(\d{1,2}):(\d{2}))?\b/;
+    let dueString = null;
+    let content = contentRaw;
+    
+    const m = EXPLICIT_DT_RE.exec(contentRaw);
+    if (m) {
+      const [, dd, MM, yyyy, HH = "00", mm = "00"] = m;
+      const dt = new Date(Number(yyyy), Number(MM) - 1, Number(dd), Number(HH), Number(mm), 0, 0);
+      dueString = dt.toISOString();
+      content = contentRaw.slice(0, m.index) + contentRaw.slice(m.index + m[0].length);
+      content = content.trim();
+    } else {
+      const normalized = contentRaw.replace(/\b(\d{1,2})\.(\d{1,2})\.(\d{2,4})\b/g, "$1/$2/$3");
+      const parsedDate = chrono.en.GB.parseDate(normalized, new Date(), { forwardDate: true });
+      if (parsedDate) {
+        dueString = parsedDate.toISOString();
+        const results = chrono.en.GB.parse(normalized);
+        if (results.length > 0) {
+          const { index, text: chronoText } = results[0];
+          const candidates = [chronoText, chronoText.replace(/\//g, "."), chronoText.replace(/\//g, "-")];
+          let toRemove = candidates.find((t) => content.includes(t));
+          if (!toRemove) {
+            content = content.slice(0, index) + content.slice(index + chronoText.length);
+          } else {
+            content = content.replace(toRemove, "");
+          }
+          content = content.trim();
+        }
+      }
+    }
+    
+    try {
+      const created = await createSubtask(parentTaskId, content || contentRaw, dueString);
+      const keyboard = new InlineKeyboard();
+      if (created && created.id) {
+        keyboard.text(t(state, 'subtasks.go_to_subtask'), `task:view:${created.id}`).row();
+      }
+      keyboard.text(t(state, 'common.back'), `task:view:${parentTaskId}`);
+      
+      await ctx.reply(t(state, 'subtasks.added_success', { content: content || contentRaw, due: dueString }), {
+        reply_markup: keyboard
+      });
+      state.mode = null;
+      state.tempData = null;
+      state.screen.type = "task_detail";
+      state.screen.taskId = parentTaskId;
+      const screen = await renderTaskDetailScreen(state, parentTaskId);
+      await updateScreen(ctx, chatId, screen);
+    } catch (e) {
+      await ctx.reply(t(state, 'subtasks.add_failed', { error: e.message }));
     }
     return;
   }

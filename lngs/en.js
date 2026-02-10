@@ -119,6 +119,22 @@ export const en = {
     labels_picker_title: "🏷️ *Manage Task Tags*\n\nSelect tags for this task:\n\n",
   },
 
+  // Subtasks
+  subtasks: {
+    section_title: "📋 Subtasks:",
+    no_subtasks: "No subtasks",
+    count: ({ current, total }) => `Showing ${current} of ${total}`,
+    add_button: "➕ Add Subtask",
+    go_to_subtask: "👁️ Go to Subtask",
+    back_to_parent: "⬆️ Back to Parent Task",
+    enter_text_prompt: "Enter subtask text",
+    enter_text_full: "📝 Enter subtask text (you can specify a date, e.g., 'Buy milk 25.12.2026'):",
+    added_success: ({ content, due }) => due
+      ? `✅ Subtask "${content}" added with due date ${due}`
+      : `✅ Subtask "${content}" added`,
+    add_failed: ({ error }) => `❌ Failed to add subtask: ${error}`,
+  },
+
   // Confirmation dialogs
   confirm: {
     delete_project: (name) => `⚠️ *Confirm Deletion*\n\nAre you sure you want to delete project "${name}"?\n\nAll tasks in this project will also be deleted.`,
