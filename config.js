@@ -4,6 +4,8 @@ import "dotenv/config";
 export const TELEGRAM_BOT_TOKEN = process.env.BOT_API_KEY;
 export const TODOIST_API_TOKEN = process.env.TODOIST_API_TOKEN;
 export const USER_CHAT_ID = Number(process.env.TG_CHAT_ID);
+export const GROQ_API_KEY = process.env.GROQ_API_KEY
+export const PROXY_URL = process.env.PROXY_URL;
 
 // === UI Configuration ===
 export const TASKS_PER_PAGE = 5;

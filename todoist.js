@@ -1,13 +1,21 @@
 import { Bot, InlineKeyboard } from "grammy";
 import * as chrono from "chrono-node";
-import { TELEGRAM_BOT_TOKEN, TODOIST_API_TOKEN, USER_CHAT_ID, TASKS_PER_PAGE, MAX_TASK_PREVIEW_LENGTH, LABEL_FILTER_ALL, LABEL_FILTER_NONE } from "./config.js";
+import { TELEGRAM_BOT_TOKEN, TODOIST_API_TOKEN, USER_CHAT_ID, GROQ_API_KEY, PROXY_URL, TASKS_PER_PAGE, MAX_TASK_PREVIEW_LENGTH, LABEL_FILTER_ALL, LABEL_FILTER_NONE } from "./config.js";
 import { userStates, notifiedTasks, loadState, migrateState, saveState } from "./state.js";
 import { todoist, getCompletedTasks, getAllProjects, getTasksByProject, addTask, deleteTask, completeTask, reopenTask, createProject, updateProject, deleteProject, getAllLabels, createLabel, updateLabel, deleteLabel, getTasksByProjectAndLabel, updateTaskLabels, updateTaskContent, updateTaskDue, getTask, getSubtasks, createSubtask } from "./todoist_api.js";
 import { renderLanguageSelectionScreen, renderMainMenu, renderProjectsScreen, renderProjectActionsScreen, renderTagsScreen, renderTagActionsScreen, renderProjectSelectionScreen, renderLabelFilterScreen, renderTaskListScreen, renderTaskDetailScreen, renderTaskLabelsPickerScreen, renderConfirmDialog, updateScreen } from "./screens.js";
 import { setupNotifications } from "./notifications.js";
 import { t } from "./lngs/index.js";
+import fs from "fs";
+import Groq from "groq-sdk";
+import path from "path";
+import { HttpsProxyAgent } from "https-proxy-agent";
 
 const bot = new Bot(TELEGRAM_BOT_TOKEN);
+const groq = new Groq({
+  apiKey: GROQ_API_KEY || "",
+  ...(PROXY_URL && { httpAgent: new HttpsProxyAgent(PROXY_URL) }),
+});
 
 // === State initialization ===
 loadState();
@@ -15,6 +23,18 @@ migrateState();
 process.on("SIGINT", () => { saveState(); process.exit(); });
 process.on("SIGTERM", () => { saveState(); process.exit(); });
 setInterval(saveState, 60 * 1000);
+
+async function downloadTelegramFile(botToken, filePath, localPath) {
+  const url = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Failed to download Telegram file: ${res.status} ${res.statusText}`);
+  }
+
+  const buffer = Buffer.from(await res.arrayBuffer());
+await fs.promises.mkdir(path.dirname(localPath), { recursive: true });
+  await fs.promises.writeFile(localPath, buffer);
+}
 
 // === COMMAND HANDLERS ===
 bot.command("start", async (ctx) => {
@@ -589,16 +609,8 @@ bot.on("callback_query:data", async (ctx) => {
   await ctx.answerCallbackQuery({ text: t(state, 'errors.unknown_action') });
 });
 
-// === MESSAGE HANDLER ===
-bot.on("message:text", async (ctx) => {
-  if (ctx.chat.id !== USER_CHAT_ID) return;
-  
-  const chatId = ctx.chat.id;
-  const state = userStates[chatId];
-  
-  if (!state || !state.mode) return;
-  
-  const text = ctx.message.text;
+async function handleModeInput(ctx, state, text) {
+    const chatId = ctx.chat.id;
   
   // === CREATE PROJECT ===
   if (state.mode === "creating_project") {
@@ -855,6 +867,68 @@ bot.on("message:text", async (ctx) => {
     }
     return;
   }
+}
+
+bot.on("message:voice", async (ctx) => {
+  if (ctx.chat.id !== USER_CHAT_ID) return;
+  const chatId = ctx.chat.id;
+  const state = userStates[chatId];
+  if (!state || !state.mode) return;
+
+  try {
+    const voice = ctx.message.voice;
+    const file = await ctx.getFile();
+    const filePath = file.file_path;
+    if (!filePath) {
+      await ctx.reply(t(state, "errors.nofile") || "Не удалось получить файл голосового.");
+      return;
+    }
+
+    const localOggPath = path.join("tmp", `${voice.file_id}.ogg`);
+
+    // 1) скачать ogg
+    await downloadTelegramFile(TELEGRAM_BOT_TOKEN, filePath, localOggPath);
+
+    // 2) отправить в Groq Whisper large v3
+    const fileBuffer = await fs.promises.readFile(localOggPath);
+    const transcription = await groq.audio.transcriptions.create({
+      file: new File([fileBuffer], path.basename(localOggPath), { type: "audio/ogg" }),
+      model: "whisper-large-v3",
+      temperature: 0,
+      response_format: "verbose_json",
+      // language: "ru",
+    });
+
+    const recognizedText = transcription.text || "";
+    if (!recognizedText.trim()) {
+      await ctx.reply(t(state, "errors.sttempty") || "Не удалось распознать голосовое.");
+      return;
+    }
+
+    // 3) Переиспользуем существующую логику ADD TASK,
+    // подставляя recognizedText вместо text
+    await handleModeInput(ctx, state, recognizedText);
+
+    // 4) Удалить временный файл после того, как всё обработано
+    await fs.promises.unlink(localOggPath).catch(err => 
+      console.error('Failed to delete temp file:', localOggPath, err)
+    );
+  } catch (e) {
+    console.error(e);
+    await ctx.reply(t(state, "errors.sttfail") || "Ошибка при распознавании голосового.");
+  }
+});
+
+// === MESSAGE HANDLER ===
+bot.on("message:text", async (ctx) => {
+  if (ctx.chat.id !== USER_CHAT_ID) return;
+
+  const chatId = ctx.chat.id;
+  const state = userStates[chatId];
+  if (!state || !state.mode) return;
+
+  const text = ctx.message.text;
+  await handleModeInput(ctx, state, text);
 });
 
 // === Setup notifications ===
