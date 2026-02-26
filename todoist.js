@@ -1,11 +1,12 @@
 import { Bot, InlineKeyboard } from "grammy";
 import * as chrono from "chrono-node";
-import { TELEGRAM_BOT_TOKEN, TODOIST_API_TOKEN, USER_CHAT_ID, GROQ_API_KEY, PROXY_URL, TASKS_PER_PAGE, MAX_TASK_PREVIEW_LENGTH, LABEL_FILTER_ALL, LABEL_FILTER_NONE } from "./config.js";
+import { TELEGRAM_BOT_TOKEN, TODOIST_API_TOKEN, USER_CHAT_ID, GROQ_API_KEY, PROXY_URL, TASKS_PER_PAGE, MAX_TASK_PREVIEW_LENGTH, LABEL_FILTER_ALL, LABEL_FILTER_NONE, AI_URL, AI_API_KEY, AI_MODEL } from "./config.js";
 import { userStates, notifiedTasks, loadState, migrateState, saveState } from "./state.js";
 import { todoist, getCompletedTasks, getAllProjects, getTasksByProject, addTask, deleteTask, completeTask, reopenTask, createProject, updateProject, deleteProject, getAllLabels, createLabel, updateLabel, deleteLabel, getTasksByProjectAndLabel, updateTaskLabels, updateTaskContent, updateTaskDue, getTask, getSubtasks, createSubtask } from "./todoist_api.js";
-import { renderLanguageSelectionScreen, renderMainMenu, renderProjectsScreen, renderProjectActionsScreen, renderTagsScreen, renderTagActionsScreen, renderProjectSelectionScreen, renderLabelFilterScreen, renderTaskListScreen, renderTaskDetailScreen, renderTaskLabelsPickerScreen, renderConfirmDialog, updateScreen } from "./screens.js";
+import { renderLanguageSelectionScreen, renderMainMenu, renderProjectsScreen, renderProjectActionsScreen, renderTagsScreen, renderTagActionsScreen, renderProjectSelectionScreen, renderAiProjectSelectionScreen, renderLabelFilterScreen, renderTaskListScreen, renderTaskDetailScreen, renderTaskLabelsPickerScreen, renderConfirmDialog, updateScreen } from "./screens.js";
 import { setupNotifications } from "./notifications.js";
 import { t } from "./lngs/index.js";
+import { isAiActivationPhrase, requestAiTaskPlan, resolveAiTaskPlan, enrichResolvedPlanLabelsByAI, hasResolvedWork, buildAiPreviewText, executeAiResolvedPlan, formatAiExecutionReport } from "./ai_planner.js";
 import fs from "fs";
 import Groq from "groq-sdk";
 import path from "path";
@@ -16,6 +17,46 @@ const groq = new Groq({
   apiKey: GROQ_API_KEY || "",
   ...(PROXY_URL && { httpAgent: new HttpsProxyAgent(PROXY_URL) }),
 });
+
+function getLocalTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+
+function applySelectedProjectToResolvedPlan(resolvedPlan, selectedProject) {
+  if (!resolvedPlan || !selectedProject?.id) return resolvedPlan;
+  const projectId = String(selectedProject.id);
+  const projectName = selectedProject.name ? String(selectedProject.name) : "";
+  const warnings = Array.isArray(resolvedPlan.warnings) ? [...resolvedPlan.warnings] : [];
+  const subtasks = Array.isArray(resolvedPlan.subtasks)
+    ? resolvedPlan.subtasks.filter((subtask) => {
+        if (subtask?.parentRef) return true;
+        if (subtask?.parentTaskId) {
+          warnings.push(
+            `Subtask '${subtask.ref || subtask.content}' skipped: parent_task_id is not allowed in selected-project AI mode`
+          );
+          return false;
+        }
+        return false;
+      })
+    : [];
+
+  return {
+    ...resolvedPlan,
+    tasks: Array.isArray(resolvedPlan.tasks)
+      ? resolvedPlan.tasks.map((task) => ({
+          ...task,
+          projectId,
+          projectName: projectName || task.projectName || null
+        }))
+      : [],
+    subtasks,
+    warnings: [...new Set(warnings)]
+  };
+}
 
 // === State initialization ===
 loadState();
@@ -197,6 +238,41 @@ bot.on("callback_query:data", async (ctx) => {
     const screen = await renderProjectSelectionScreen(state);
     await updateScreen(ctx, chatId, screen);
     await ctx.answerCallbackQuery();
+    return;
+  }
+
+  if (data === "menu:ai") {
+    state.mode = "ai_waiting_project";
+    state.tempData = null;
+    state.screen.type = "ai_project_selection";
+    const screen = await renderAiProjectSelectionScreen(state);
+    await updateScreen(ctx, chatId, screen);
+    await ctx.answerCallbackQuery();
+    return;
+  }
+
+  if (data.startsWith("ai:selproj:")) {
+    const projectId = data.split(":")[2];
+    const projects = await getAllProjects();
+    const selectedProject = Array.isArray(projects) ? projects.find((p) => String(p.id) === String(projectId)) : null;
+
+    if (!selectedProject) {
+      state.mode = "ai_waiting_project";
+      state.tempData = null;
+      state.screen.type = "ai_project_selection";
+      const screen = await renderAiProjectSelectionScreen(state);
+      await updateScreen(ctx, chatId, screen);
+      await ctx.answerCallbackQuery({ text: t(state, 'ai.project_missing') });
+      return;
+    }
+
+    state.mode = "ai_waiting_request";
+    state.tempData = {
+      aiSelectedProjectId: String(selectedProject.id),
+      aiSelectedProjectName: selectedProject.name || ""
+    };
+    await ctx.answerCallbackQuery({ text: t(state, 'ai.project_selected', selectedProject.name || "") });
+    await ctx.reply(`${t(state, 'ai.project_selected', selectedProject.name || "")}\n${t(state, 'ai.enter_prompt')}`);
     return;
   }
   
@@ -600,6 +676,46 @@ bot.on("callback_query:data", async (ctx) => {
     }
     return;
   }
+
+  if (data === "ai:confirm") {
+    await ctx.answerCallbackQuery();
+    const plan = state.tempData?.aiResolvedPlan;
+    if (!plan) {
+      await ctx.reply(t(state, 'errors.unknown_action'));
+      return;
+    }
+
+    await ctx.reply(t(state, 'ai.execution_started'));
+    try {
+      const report = await executeAiResolvedPlan(plan, {
+        addTask,
+        createSubtask,
+        updateTaskDue,
+        updateTaskLabels
+      });
+
+      await ctx.reply(`${t(state, 'ai.report_title')}\n\n${formatAiExecutionReport(report)}`);
+    } catch (e) {
+      await ctx.reply(t(state, 'ai.generation_failed', e.message || "execution_failed"));
+    }
+    state.mode = null;
+    state.tempData = null;
+    state.screen.type = "main_menu";
+    const screen = renderMainMenu(state);
+    await updateScreen(ctx, chatId, screen);
+    return;
+  }
+
+  if (data === "ai:cancel") {
+    await ctx.answerCallbackQuery();
+    state.mode = null;
+    state.tempData = null;
+    await ctx.reply(t(state, 'ai.cancelled'));
+    state.screen.type = "main_menu";
+    const screen = renderMainMenu(state);
+    await updateScreen(ctx, chatId, screen);
+    return;
+  }
   
   if (data === "noop") {
     await ctx.answerCallbackQuery();
@@ -611,6 +727,105 @@ bot.on("callback_query:data", async (ctx) => {
 
 async function handleModeInput(ctx, state, text) {
     const chatId = ctx.chat.id;
+
+  // === AI PLANNER ===
+  if (state.mode === "ai_waiting_project") {
+    await ctx.reply(t(state, 'ai.choose_project_first'));
+    return;
+  }
+
+  if (state.mode === "ai_waiting_request") {
+    if (!AI_URL || !AI_API_KEY || !AI_MODEL) {
+      await ctx.reply(t(state, 'ai.config_error'));
+      return;
+    }
+
+    const selectedProjectId = state.tempData?.aiSelectedProjectId;
+    if (!selectedProjectId) {
+      state.mode = "ai_waiting_project";
+      state.tempData = null;
+      state.screen.type = "ai_project_selection";
+      const screen = await renderAiProjectSelectionScreen(state);
+      await updateScreen(ctx, chatId, screen);
+      await ctx.reply(t(state, 'ai.choose_project_first'));
+      return;
+    }
+
+    await ctx.reply(t(state, 'ai.processing'));
+
+    try {
+      const projects = await getAllProjects();
+      const labels = await getAllLabels();
+      const timezone = getLocalTimezone();
+      const selectedProject =
+        Array.isArray(projects) ? projects.find((p) => String(p.id) === String(selectedProjectId)) : null;
+
+      if (!selectedProject) {
+        state.mode = "ai_waiting_project";
+        state.tempData = null;
+        state.screen.type = "ai_project_selection";
+        const screen = await renderAiProjectSelectionScreen(state);
+        await updateScreen(ctx, chatId, screen);
+        await ctx.reply(t(state, 'ai.project_missing'));
+        return;
+      }
+
+      const { plan } = await requestAiTaskPlan({
+        text,
+        timezone,
+        projects,
+        labels,
+        aiUrl: AI_URL,
+        aiApiKey: AI_API_KEY,
+        aiModel: AI_MODEL
+      });
+
+      let resolvedPlan = resolveAiTaskPlan(plan, { projects, labels });
+      resolvedPlan = await enrichResolvedPlanLabelsByAI(resolvedPlan, {
+        availableLabels: labels,
+        aiUrl: AI_URL,
+        aiApiKey: AI_API_KEY,
+        aiModel: AI_MODEL,
+        sourceText: text
+      });
+      resolvedPlan = applySelectedProjectToResolvedPlan(resolvedPlan, selectedProject);
+      if (!hasResolvedWork(resolvedPlan)) {
+        await ctx.reply(t(state, 'ai.no_work'));
+        return;
+      }
+
+      const previewText = [
+        t(state, 'ai.preview_title'),
+        t(state, 'ai.selected_project_preview', selectedProject.name || "-"),
+        "",
+        buildAiPreviewText(resolvedPlan)
+      ].join("\n");
+      const keyboard = new InlineKeyboard()
+        .text(t(state, 'ai.confirm_button'), "ai:confirm")
+        .text(t(state, 'ai.cancel_button'), "ai:cancel");
+
+      state.mode = "ai_confirm_pending";
+      state.tempData = {
+        aiSourceText: text,
+        aiResolvedPlan: resolvedPlan,
+        aiSelectedProjectId: String(selectedProject.id),
+        aiSelectedProjectName: selectedProject.name || ""
+      };
+
+      await ctx.reply(previewText, { reply_markup: keyboard });
+    } catch (e) {
+      await ctx.reply(t(state, 'ai.generation_failed', e.message || "unknown_error"));
+    }
+    return;
+  }
+
+  if (state.mode === "ai_confirm_pending") {
+    const selectedProjectName = state.tempData?.aiSelectedProjectName || "-";
+    await ctx.reply(
+      `${t(state, 'ai.preview_title')}\n${t(state, 'ai.selected_project_preview', selectedProjectName)}`
+    );
+    return;
+  }
   
   // === CREATE PROJECT ===
   if (state.mode === "creating_project") {
@@ -925,9 +1140,20 @@ bot.on("message:text", async (ctx) => {
 
   const chatId = ctx.chat.id;
   const state = userStates[chatId];
-  if (!state || !state.mode) return;
-
+  if (!state) return;
   const text = ctx.message.text;
+
+  if (!state.mode && isAiActivationPhrase(text)) {
+    state.mode = "ai_waiting_project";
+    state.tempData = null;
+    state.screen.type = "ai_project_selection";
+    const screen = await renderAiProjectSelectionScreen(state);
+    await updateScreen(ctx, chatId, screen);
+    await ctx.reply(t(state, 'ai.choose_project_first'));
+    return;
+  }
+
+  if (!state.mode) return;
   await handleModeInput(ctx, state, text);
 });
 

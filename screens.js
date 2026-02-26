@@ -39,6 +39,7 @@ export function renderMainMenu(state) {
     .text(t(state, 'menu.projects'), "menu:projects").row()
     .text(t(state, 'menu.tags'), "menu:tags").row()
     .text(t(state, 'menu.tasks'), "menu:tasks").row()
+    .text(t(state, 'menu.ai'), "menu:ai").row()
     .text(t(state, 'menu.language'), "settings:language");
   return { text, keyboard };
 }
@@ -175,6 +176,27 @@ export async function renderProjectSelectionScreen(state) {
   return { text, keyboard };
 }
 
+export async function renderAiProjectSelectionScreen(state) {
+  const projects = await getAllProjects();
+  let text = t(state, 'ai.select_project_title');
+
+  if (projects.length === 0) {
+    text = t(state, 'ai.no_projects');
+    const keyboard = new InlineKeyboard()
+      .text(t(state, 'ai.go_to_projects'), "menu:projects").row()
+      .text(t(state, 'common.back'), "menu:main");
+    return { text, keyboard };
+  }
+
+  const keyboard = new InlineKeyboard();
+  projects.forEach((p) => {
+    keyboard.text(p.name, `ai:selproj:${p.id}`).row();
+  });
+  keyboard.text(t(state, 'common.back'), "menu:main");
+
+  return { text, keyboard };
+}
+
 export async function renderLabelFilterScreen(state, projectId) {
   const projects = await getAllProjects();
   const project = projects.find(p => p.id === projectId);
@@ -252,7 +274,7 @@ export async function renderTaskListScreen(chatId) {
   pageTasks.forEach((task, i) => {
     const taskId = showCompleted ? task.v2_task_id || task.id : task.id;
     const taskContent = task.item_object?.content ?? task.content ?? "";
-    const label = `${startIdx + i + 1}. ${taskContent.substring(0, 20)}${taskContent.length > 20 ? '...' : ''}`;
+    const label = `${startIdx + i + 1}. ${taskContent.substring(0, 44)}${taskContent.length > 44 ? '...' : ''}`;
     keyboard.text(label, `task:view:${taskId}`).row();
   });
   

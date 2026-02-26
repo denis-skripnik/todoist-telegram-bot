@@ -63,6 +63,7 @@ export const en = {
     projects: "📋 Projects",
     tags: "🏷️ Tags",
     tasks: "✅ Tasks",
+    ai: "AI",
     language: "🌐 Language",
   },
 
@@ -159,6 +160,28 @@ export const en = {
     enter_new_due_full: "📅 Enter new due date (e.g., tomorrow at 3pm, 25.12.2026):",
   },
 
+
+  // AI
+  ai: {
+    select_project_title: "AI: select a project for new tasks.",
+    no_projects: "AI: no projects found. Create a project first.",
+    go_to_projects: "Go to projects",
+    project_selected: (name) => `Selected project: ${name}`,
+    project_missing: "Selected project is no longer available. Please choose a project again.",
+    choose_project_first: "Choose a project in AI section first.",
+    selected_project_preview: (name) => `Selected project: ${name}`,
+    enter_prompt: "Send a request for AI planning (single task, week plan, month plan).",
+    processing: "Analyzing request and building JSON plan...",
+    preview_title: "AI plan preview. Confirm to create:",
+    confirm_button: "Confirm create",
+    cancel_button: "Cancel",
+    cancelled: "AI plan cancelled",
+    no_work: "No tasks/subtasks found in AI plan.",
+    config_error: "AI config is incomplete. Set AI_URL, AI_API_KEY and AI_MODEL.",
+    generation_failed: (msg) => `AI planning failed: ${msg}`,
+    execution_started: "Creating tasks and subtasks...",
+    report_title: "Execution report:"
+  },
   // Notifications
   notifications: {
     task_time: (project, content, time) => `⏰ *Time to start task!*\n\nProject: ${project}\n${content}\n📅 Time: ${time}`,

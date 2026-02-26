@@ -1,215 +1,195 @@
-# Telegram Todoist Bot
+﻿# Telegram Todoist Bot
 
-A personal Telegram bot for managing Todoist tasks with a clean single-message interface. Designed for single-user use with comprehensive task, project, and tag management capabilities.
+Personal Telegram bot for Todoist with a single-message UI, voice input, and AI task planning.
 
 ## Features
 
-- **Multi-language Support** - Full support for Russian and English languages
-- **Language Selection** - Choose your preferred language on first start, change it anytime via menu
-- **Single-message UX** - All interactions happen in one message that updates dynamically, keeping your chat clean
-- **Voice Message Support** - Create tasks, subtasks, and edit due dates using voice messages (powered by Groq Whisper)
-- **Project Management** - Create, rename, and delete Todoist projects (supports up to 5 projects on Todoist Free plan)
-- **Task Management** - Add, complete, reopen, delete tasks, edit task content and due dates
-- **Tag Management** - Create, rename, and delete labels/tags for task organization
-- **Task Filtering** - Filter tasks by tags (all tasks, specific tag, or tasks without tags)
-- **Subtasks Support** - View and create subtasks inside task details
-- **Smart Notifications** - Automatic notifications for tasks with due times (checked every minute) and daily reminders at 9:00 AM for tasks without specific times
-- **Natural Language Dates** - Parse dates in various formats (e.g., "tomorrow at 15:00", "25.12.2026")
-- **Pagination** - Browse tasks in pages (5 tasks per page)
+- Single-user bot (restricted by `TG_CHAT_ID`)
+- Russian and English interface
+- Single-message UX (main screens are edited in place)
+- Project management: create, rename, delete
+- Tag management: create, rename, delete
+- Task management: create, edit, complete/reopen, delete
+- Subtasks: create and browse inside task details
+- Task filtering by label (all, specific label, no labels)
+- Date parsing from natural text (for tasks and subtasks)
+- Voice input via Groq Whisper (`message:voice`)
+- AI planner with preview and confirmation flow
+- Notifications:
+  - exact-time tasks checked every minute
+  - daily reminder at 09:00 for tasks due today without exact time
 
 ## Requirements
 
-- Node.js 18+ (with ES modules support and built-in `fetch`)
+- Node.js 18+
 - npm
-- Telegram Bot Token (from [@BotFather](https://t.me/BotFather))
-- Todoist API Token
-- Your Telegram Chat ID
-- Groq API Key (for voice message transcription)
-- **Optional:** HTTP/SOCKS5 proxy (if Groq API is blocked in your region)
+- Telegram bot token (from [@BotFather](https://t.me/BotFather))
+- Todoist API token
+- Your Telegram chat ID
+- AI provider credentials for an OpenAI-compatible Chat Completions endpoint:
+  - `AI_URL`
+  - `AI_API_KEY`
+  - `AI_MODEL`
+- Optional for voice input:
+  - `GROQ_API_KEY`
+  - `PROXY_URL` (if needed in your region)
 
 ## Installation
 
-1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd todoist
-```
-
-2. Install dependencies:
-```bash
+cd todoist-telegram-bot
 npm install
 ```
 
 ## Configuration
 
-1. Create a `.env` file in the project root based on `.env.example`:
+1. Create `.env` from `.env.example`.
+
 ```bash
 cp .env.example .env
 ```
 
-2. Fill in your credentials in the `.env` file:
-   - `BOT_API_KEY` - Get from [@BotFather](https://t.me/BotFather) on Telegram
-   - `TG_CHAT_ID` - Your personal Telegram chat ID (you can get it from [@userinfobot](https://t.me/userinfobot))
-   - `TODOIST_API_TOKEN` - Get from Todoist Settings → Integrations → Developer
-   - `GROQ_API_KEY` - Get from [Groq Console](https://console.groq.com/keys) (for voice transcription)
-   - `PROXY_URL` - *(Optional)* Only needed if Groq API is blocked in your region (see [Proxy Configuration](#proxy-configuration))
+2. Fill values in `.env`.
 
-**Important:** The bot is restricted to work only with the chat ID specified in `TG_CHAT_ID`. This is a single-user bot for personal use.
+Required base config:
 
-### Proxy Configuration
+- `BOT_API_KEY` - Telegram bot token
+- `TG_CHAT_ID` - your personal chat ID
+- `TODOIST_API_TOKEN` - Todoist API token
 
-If Groq API is blocked in your region (e.g., Russia), you need to configure a proxy:
+Required AI config:
 
-1. Set up an HTTP, HTTPS, or SOCKS5 proxy server
-2. Add the proxy URL to your `.env` file:
+- `AI_URL` - OpenAI-compatible endpoint (example: OpenRouter chat completions URL)
+- `AI_API_KEY` - AI provider API key
+- `AI_MODEL` - model identifier
+
+Optional voice config:
+
+- `GROQ_API_KEY` - required only for voice transcription
+- `PROXY_URL` - optional proxy URL (HTTP/HTTPS/SOCKS5)
+
+Examples:
 
 ```env
-# Example formats:
+AI_URL="https://openrouter.ai/api/v1/chat/completions"
+AI_API_KEY="your_ai_api_key_here"
+AI_MODEL="z-ai/glm-4.6:exacto"
+
+# Optional voice transcription:
+GROQ_API_KEY="your_groq_api_key_here"
 PROXY_URL="http://proxy.example.com:8080"
-PROXY_URL="socks5://127.0.0.1:1080"
-PROXY_URL="http://user:pass@proxy.example.com:8080"
 ```
 
-3. If you don't need a proxy, leave `PROXY_URL` empty or remove it from `.env`
+Important: the bot only responds to messages from `TG_CHAT_ID`.
 
 ## Running
 
-Start the bot:
 ```bash
 node todoist.js
 ```
 
-The bot will start and display "Bot started" in the console. Keep the process running to receive notifications.
+## Commands
+
+- `/start` - initialize bot and open main menu
+- `/tasks` - open tasks section directly
+
+## AI Planner
+
+AI planner works in two ways:
+
+1. Through the `AI` button in main menu.
+2. By activation phrases in text messages (for example: `plan for week`, `plan for month`, `create task`, `план на неделю`, `план на месяц`, `создай задачу`).
+
+Flow in AI menu:
+
+1. Select target project.
+2. Send prompt (single task, weekly plan, or monthly plan).
+3. Bot generates structured plan and sends preview.
+4. Confirm or cancel creation.
+
+Notes:
+
+- AI config must be complete (`AI_URL`, `AI_API_KEY`, `AI_MODEL`).
+- The bot requests a JSON plan, resolves due dates/labels, then executes task/subtask creation.
+- Final output includes an execution report with counts and errors.
+
+## Voice Input
+
+Voice messages are supported when bot is waiting for text input (create/edit task, create subtask, edit due date).
+
+- Audio is transcribed with Groq Whisper (`whisper-large-v3`).
+- Recognized text is passed into the same text handlers as normal input.
+- If Groq access is blocked, set `PROXY_URL`.
+
+## Notifications
+
+- Exact due time: checked every minute.
+- Daily reminder: runs at `09:00` server local time for tasks due today without exact time.
 
 ## File Structure
 
+```text
+todoist-telegram-bot/
+├── todoist.js          # Main entry point and Telegram handlers
+├── ai_planner.js       # AI planning, schema validation, execution/report
+├── config.js           # Environment config
+├── state.js            # State loading/saving/migration
+├── todoist_api.js      # Todoist API helpers
+├── screens.js          # UI rendering and inline keyboards
+├── notifications.js    # Scheduled notifications
+├── lngs/               # i18n
+│   ├── index.js
+│   ├── ru.js
+│   └── en.js
+├── .env.example
+├── package.json
+└── state.json          # Auto-generated runtime state
 ```
-todoist/
-├── todoist.js           # Main entry point, bot initialization and handlers
-├── config.js            # Configuration and environment variables
-├── state.js             # User state management and persistence
-├── todoist_api.js       # Todoist API wrapper functions
-├── screens.js           # UI rendering and screen management
-├── notifications.js     # Task notification system
-├── lngs/                # Internationalization (i18n)
-│   ├── index.js         # Translation helper function
-│   ├── ru.js            # Russian translations
-│   └── en.js            # English translations
-├── package.json         # Dependencies and project metadata
-├── .env                 # Environment variables (not in git)
-├── .env.example         # Environment variables template
-└── state.json          # Persistent state storage (auto-generated)
-```
-
-## Usage
-
-### First Start
-
-When you first run `/start`, the bot will ask you to select your preferred language (Russian or English). Your choice will be saved and used for all future interactions.
-
-### Basic Commands
-
-- `/start` - Initialize the bot and show main menu (or language selection if not set)
-- `/tasks` - Quick access to tasks view
-
-### Navigation
-
-The bot uses an interactive button-based interface. After starting with `/start`, you can:
-
-1. **📋 Projects / Проекты** - Manage Todoist projects
-   - View all projects
-   - Create new projects (up to 5 on free plan)
-   - Rename or delete existing projects
-
-2. **🏷️ Tags / Теги** - Manage labels
-   - View all labels/tags
-   - Create new tags
-   - Rename or delete existing tags
-
-3. **✅ Tasks / Задачи** - Manage tasks
-   - Select a project
-   - Filter by tag (all, specific tag, or no tags)
-   - View task list with pagination
-   - Add new tasks with natural language dates
-   - Complete, reopen, edit, or delete tasks
-   - Manage task tags
-
-4. **🌐 Language / Язык** - Change interface language
-   - Switch between Russian and English
-   - Language preference is saved in `state.json`
-
-### Adding Tasks with Dates
-
-When adding a task, you can include dates in various formats:
-
-- `Buy milk tomorrow at 15:00`
-- `Meeting 25.12.2026 10:30`
-- `Call John next Monday`
-
-The bot will automatically parse and extract the date from your task description.
-
-### Using Voice Messages
-
-You can use voice messages to create tasks, subtasks, or edit due dates:
-
-1. **Creating a task**: When the bot asks you to enter task text, send a voice message instead. The bot will transcribe it and create a task.
-2. **Creating a subtask**: Same as above - send a voice message when prompted for subtask text.
-3. **Editing due date**: Send a voice message with the date (e.g., "завтра в 19:00" or "tomorrow at 7 PM").
-
-**Note:** Voice transcription is powered by Groq Whisper-large-v3 and supports multiple languages including Russian and English.
-
-## Language
-
-The bot supports two languages:
-- **English (EN)** - Full interface in English
-- **Russian (RU)** - Full interface in Russian
-
-Your language preference is saved in state.json and persists across bot restarts. You can change the language at any time by selecting **🌐 Language / Язык** from the main menu.
 
 ## Troubleshooting
 
-### Bot doesn't respond
-- **Check TG_CHAT_ID**: Make sure the `TG_CHAT_ID` in your `.env` file matches your actual Telegram chat ID. The bot will ignore messages from other users.
-- **Verify bot token**: Ensure `BOT_API_KEY` is correct and the bot is not stopped in BotFather.
+### Bot does not respond
 
-### Voice messages not working
-- **403 Forbidden error**: Groq API might be blocked in your region. Configure a proxy (see [Proxy Configuration](#proxy-configuration)).
-- **Invalid API key**: Check that `GROQ_API_KEY` is correct in your `.env` file. Get a new key from [Groq Console](https://console.groq.com/keys).
-- **Model permissions**: Verify that `whisper-large-v3` is allowed in your Groq organization settings.
+- Check `TG_CHAT_ID` in `.env`.
+- Check `BOT_API_KEY`.
+- Make sure process is running.
 
-### "Invalid callback_data" errors
-- This usually happens when the bot restarts and old messages have outdated button data. Send `/start` to reinitialize the interface with the current session.
+### AI does not work
 
-### Todoist API errors
-- **Invalid token**: Check that `TODOIST_API_TOKEN` is correct in your `.env` file.
-- **Project limit reached**: Todoist Free plan allows only 5 projects. Delete an existing project before creating a new one.
-- **Rate limiting**: If you make too many requests quickly, Todoist API may temporarily rate limit your requests.
+- Verify `AI_URL`, `AI_API_KEY`, `AI_MODEL`.
+- If preview has no tasks/subtasks, clarify prompt.
+- If provider returns schema errors, retry with a more explicit request.
 
-### Notifications not working
-- Ensure the bot process is running continuously (not just when you interact with it).
-- Check that tasks have proper due dates set.
-- Notifications for tasks with specific times are checked every minute.
-- Daily notifications for tasks without times are sent at 9:00 AM.
+### Voice transcription fails
 
-### About subtasks
-Subtasks are shown only in task detail and are not displayed in the general task list of the project.
+- Verify `GROQ_API_KEY`.
+- If region/network blocks Groq, configure `PROXY_URL`.
 
-## Security Note
+### Old buttons stop working
 
-**Important:** Never commit your `.env` file to version control. It contains sensitive tokens and credentials.
+- Send `/start` to refresh active UI message and callbacks.
 
-- Keep your `BOT_API_KEY`, `TG_CHAT_ID`, `TODOIST_API_TOKEN`, and `GROQ_API_KEY` private
-- The `.env` file is already included in `.gitignore`
-- Only share `.env.example` as a template
+## Security
+
+Never commit `.env`.
+
+Keep private:
+
+- `BOT_API_KEY`
+- `TG_CHAT_ID`
+- `TODOIST_API_TOKEN`
+- `AI_API_KEY`
+- `GROQ_API_KEY`
 
 ## Dependencies
 
-- `grammy` - Telegram Bot framework
-- `@doist/todoist-api-typescript` - Official Todoist API client
-- `groq-sdk` - Groq API client for voice transcription
-- `https-proxy-agent` - HTTP/HTTPS/SOCKS5 proxy support
-- `chrono-node` - Natural language date parser
-- `node-cron` - Task scheduler for notifications
-- `date-fns` - Date formatting utilities
-- `axios` - HTTP client for Todoist Sync API
-- `dotenv` - Environment variable management
+- `grammy`
+- `@doist/todoist-api-typescript`
+- `axios`
+- `chrono-node`
+- `date-fns`
+- `node-cron`
+- `groq-sdk`
+- `https-proxy-agent`
+- `dotenv`
