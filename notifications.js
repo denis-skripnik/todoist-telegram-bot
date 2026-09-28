@@ -67,12 +67,35 @@ export async function notifyTodayTasks(bot) {
 
 // === SCHEDULER SETUP ===
 export function setupNotifications(bot) {
-  // Run check every minute
-  setInterval(() => { notifyTasksWithExactTime(bot).catch(console.error); }, 60 * 1000);
+  // One running pass and at most one pending pass of each type. A slow
+  // exact-time pass must not discard the daily notification (or grow a queue).
+  const pending = new Set();
+  let running = false;
+  async function enqueue(type) {
+    pending.add(type);
+    if (running) return;
+    running = true;
+    try {
+      while (pending.size) {
+        const next = pending.values().next().value;
+        pending.delete(next);
+        try {
+          if (next === "exact") {
+            await notifyTasksWithExactTime(bot);
+          } else {
+            console.log("Running daily notification for tasks without exact time");
+            await notifyTodayTasks(bot);
+          }
+        } catch (error) {
+          console.error(error);
+        }
+      }
+    } finally {
+      running = false;
+    }
+  }
 
-  // Daily at 09:00
-  cron.schedule("0 9 * * *", () => {
-    console.log("Running daily notification for tasks without exact time");
-    notifyTodayTasks(bot).catch(console.error);
-  });
+  // Run check every minute; daily at 09:00.
+  setInterval(() => { enqueue("exact").catch(console.error); }, 60 * 1000);
+  cron.schedule("0 9 * * *", () => { enqueue("daily").catch(console.error); });
 }

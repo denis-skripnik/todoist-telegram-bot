@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+globalThis.__calls=[];globalThis.setInterval=()=>({unref(){}});globalThis.fetch=async()=>{throw Error('Real network forbidden')};
+await import('../../todoist.js');
+const bot=globalThis.__smokeBot;assert.ok(bot);
+const from={id:42,is_bot:false,first_name:'Fixture'};
+const msg={message_id:1,date:1,chat:{id:42,type:'private'},from};
+await bot.handleUpdate({update_id:1,message:{...msg,text:'/start',entities:[{type:'bot_command',offset:0,length:6}]}});
+assert.ok(__calls.some(c=>c.method==='sendMessage' && c.payload.reply_markup.inline_keyboard.length));
+await bot.handleUpdate({update_id:2,callback_query:{id:'cb1',from,chat_instance:'fixture',message:msg,data:'lng:set:ru'}});
+await bot.handleUpdate({update_id:3,callback_query:{id:'cb2',from,chat_instance:'fixture',message:msg,data:'menu:projects'}});
+assert.ok(__calls.some(c=>c.method==='editMessageText' && c.payload.text.includes('Fixture project')));
+const state=await import('../../state.js');assert.equal(state.userStates[42].lng,'ru');state.saveState();assert.equal(JSON.parse(readFileSync('state.json','utf8')).userStates[42].lng,'ru');
+const before=__calls.length;await bot.handleUpdate({update_id:4,message:{...msg,chat:{id:99,type:'private'},text:'/start',entities:[{type:'bot_command',offset:0,length:6}]}});assert.equal(__calls.length,before);
+console.log('REAL_ENTRYPOINT_MENU_STATE_SMOKE_OK');

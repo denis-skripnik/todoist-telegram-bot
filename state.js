@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { randomUUID } from "node:crypto";
 
 // === State Structure ===
 // userStates[chatId] = {
@@ -84,5 +85,17 @@ export function migrateState() {
 
 export function saveState() {
   const data = { userStates, notifiedTasks: Array.from(notifiedTasks) };
-  fs.writeFileSync(stateFilePath, JSON.stringify(data, null, 2));
+  const serialized = JSON.stringify(data, null, 2);
+  const tempPath = `${stateFilePath}.${randomUUID()}.tmp`;
+  try {
+    // Same directory/filesystem: readers see either the old or complete new JSON.
+    fs.writeFileSync(tempPath, serialized, { flag: "wx", mode: 0o600 });
+    fs.renameSync(tempPath, stateFilePath);
+  } finally {
+    try {
+      fs.unlinkSync(tempPath);
+    } catch (error) {
+      if (error.code !== "ENOENT") console.error("Failed to remove state temp file:", error);
+    }
+  }
 }

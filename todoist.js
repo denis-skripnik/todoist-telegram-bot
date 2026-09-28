@@ -63,7 +63,13 @@ loadState();
 migrateState();
 process.on("SIGINT", () => { saveState(); process.exit(); });
 process.on("SIGTERM", () => { saveState(); process.exit(); });
-setInterval(saveState, 60 * 1000);
+setInterval(() => {
+  try {
+    saveState();
+  } catch (error) {
+    console.error("Error saving state:", error);
+  }
+}, 60 * 1000);
 
 async function downloadTelegramFile(botToken, filePath, localPath) {
   const url = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
@@ -1090,6 +1096,7 @@ bot.on("message:voice", async (ctx) => {
   const state = userStates[chatId];
   if (!state || !state.mode) return;
 
+  let localOggPath;
   try {
     const voice = ctx.message.voice;
     const file = await ctx.getFile();
@@ -1099,7 +1106,7 @@ bot.on("message:voice", async (ctx) => {
       return;
     }
 
-    const localOggPath = path.join("tmp", `${voice.file_id}.ogg`);
+    localOggPath = path.join("tmp", `${voice.file_id}.ogg`);
 
     // 1) скачать ogg
     await downloadTelegramFile(TELEGRAM_BOT_TOKEN, filePath, localOggPath);
@@ -1124,13 +1131,19 @@ bot.on("message:voice", async (ctx) => {
     // подставляя recognizedText вместо text
     await handleModeInput(ctx, state, recognizedText);
 
-    // 4) Удалить временный файл после того, как всё обработано
-    await fs.promises.unlink(localOggPath).catch(err => 
-      console.error('Failed to delete temp file:', localOggPath, err)
-    );
   } catch (e) {
     console.error(e);
     await ctx.reply(t(state, "errors.sttfail") || "Ошибка при распознавании голосового.");
+  } finally {
+    if (localOggPath) {
+      try {
+        await fs.promises.unlink(localOggPath);
+      } catch (error) {
+        if (error.code !== "ENOENT") {
+          console.error("Failed to delete temp file:", localOggPath, error);
+        }
+      }
+    }
   }
 });
 
