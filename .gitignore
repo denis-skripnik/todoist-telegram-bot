@@ -1,2 +1,7 @@
 node_modules/
 .env
+state.json
+state.json.*.tmp
+tmp/
+*.ogg
+*.log
